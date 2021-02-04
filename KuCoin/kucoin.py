@@ -6,11 +6,21 @@ import hmac
 import hashlib
 
 
-class KuCoin:
+class KuCoin(DEBUG=True):
+    """
+
+    """
+
+    TRADABLE_COINS = []
+
 
     def __init__(self):
         # Check in with Kucoin and make sure there is a valid response
-        pass
+
+
+        if DEBUG:
+            print("Connected to KuCoin API")
+
 
     def __create_headers(endpoint, header_type='GET', data={}):
         """
@@ -69,20 +79,54 @@ class KuCoin:
             return 'Error: ' + response['msg']
 
 
-    def get_account_balances():
-        pass
+    def set_tradable_coins(coins=[]):
+        """
+        Sets the coins that we are allowed to trade
+
+        coins: an array of coin tickers
+        """
+        # Should check the coins entered are valid
+        # Should make sure there are funds available
+        TRADABLE_COINS = []
+        return True
 
 
+    def tradable_coins():
+        """
+        Future proofing, might want to make further checks here at some point
+        """
+        if is_empty(TRADABLE_COINS):
+            return False
+        else:
+            return True
 
 
+    def update_account_balances():
+        """
+        Returns a list of all the accounts attached to the KuCoin Main accounts
 
+        resp: The response
+        """
+        endpoint = "/api/v1/accounts"
+        url = API_URL + endpoint
+        headers = create_get_headers(endpoint)
+        r = requests.request('get', url, headers=headers)
 
+        json_data = r.json()
+
+        resp = pd.DataFrame(handle_return(json_data)['data'])
+        resp = resp.loc[resp['type'] == 'main']
+
+        if DEBUG:
+        print_debug([resp])
+
+        return resp
 
 
 
     def delete_active_loan(id):
         """
-        Deletes a specif loan order
+        Deletes a specific loan order
 
         id: a String of the loan order id
 
