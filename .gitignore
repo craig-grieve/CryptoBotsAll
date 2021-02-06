@@ -1,1 +1,3 @@
+*.pyc
 KuCoin/config.py
+KuCoin/__init__.pyc
