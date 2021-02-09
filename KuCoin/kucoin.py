@@ -4,6 +4,7 @@ import os, sys
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(currentdir)
+#print(sys.version)
 
 import json
 import requests
@@ -12,7 +13,9 @@ import base64
 import hmac
 import hashlib
 import pandas as pd
+import time
 import config
+
 
 """
 TODO: Account Breakouts
@@ -24,6 +27,8 @@ TODO: POST order for a single coin
 TODO: DELETE an order
 TODO: GET Market Tickers
 TODO: GET Order Book
+
+TODO: TESTS!!!!!!! TESTS!!!!! TESTS!!!!!!!
 
 """
 
@@ -40,18 +45,18 @@ class KuCoin:
     ALLOWED_ACCOUNTS = pd.DataFrame()
 
 
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, sandbox=False):
         # Check in with Kucoin and make sure there is a valid response
         self.DEBUG = debug
+        self.SANDBOX = sandbox
 
         if self.DEBUG:
             print('----', 'Init', '----')
             print('DEBUG:', self.DEBUG)
             print('SANDBOX:', self.SANDBOX)
             print('')
+
         self.__update_account_balances()
-
-
 
 
     def __create_headers(self, endpoint, header_type='GET', data={}):
@@ -96,6 +101,34 @@ class KuCoin:
 
         return headers
 
+    def __send_request(self, endpoint, data={}):
+        """
+        Returns the response from the API after forming the request
+
+        endpoint: string endpoint of the API including any GET variables
+        """
+
+        url = self.__configure_URL(endpoint)
+
+        if not data:
+            if self.DEBUG:
+                print('Sending GET request:', url)
+
+            headers = self.__create_headers(endpoint, 'GET', '')
+            r = requests.request('get', url, headers=headers)
+        else:
+            if self.DEBUG:
+                print('Sending POST request:', url, data, '')
+
+            headers = create_post_headers(endpoint, data=data)
+            jsn = json.dumps(data)
+            r = requests.request('post', url, data=jsn, headers=headers)
+
+        json_data = r.json()
+        resp = self.__handle_return(json_data)
+
+        return resp
+
 
     def __handle_return(self, response):
         """
@@ -105,12 +138,14 @@ class KuCoin:
         """
 
         if response['code'] == '200000':
+            ret_resp = pd.DataFrame(response['data'])
+
             if self.DEBUG:
                 print("SUCCESSFUL Response")
-                print(response['code'], ':', response['data'])
+                print(response['code'], ':', 'returned', len(response['data']), 'items of type ', type(response['data']) ,'::', response['data'][0])
+                print('DataFrame:', ret_resp.shape)
                 print('')
 
-            ret_resp = pd.DataFrame(response['data'])
             return ret_resp
         else:
             # Handle the individual responses here
@@ -163,6 +198,7 @@ class KuCoin:
 
 
     def tradable_coins(self):
+        # Look to remove
         """
         Future proofing, might want to make further checks here at some point
         """
@@ -179,12 +215,7 @@ class KuCoin:
         resp: The response
         """
         endpoint = "/api/v1/accounts"
-        url = self.__configure_URL(endpoint)
-        headers = self.__create_headers(endpoint, 'GET')
-        r = requests.request('get', url, headers=headers)
-
-        json_data = r.json()
-        resp = self.__handle_return(json_data)
+        resp = self.__send_request(endpoint)
 
         if(self.__no_error_in_response(resp)):
             self.ACCOUNTS = resp
@@ -201,6 +232,118 @@ class KuCoin:
             return True
         else:
             return False
+
+
+    def place_single_order(self, coin, quanity):
+        """
+
+        """
+
+        # Check coin is Allowed
+        # Check quanity is available
+        return True
+
+
+    def delete_single_order(self, order_id):
+        """
+        """
+
+        # cancel the order
+        return True
+
+
+    def get_orders(self, coin):
+        """
+        """
+
+        # Check coin is Allowed
+        # Handle limting the orders
+        return True
+
+
+    def __check_candle_type(self, candle_type):
+        """
+        Returns the number of minutes if the candle type is in the allowed types
+
+        candle_type: string of the candle type
+        """
+
+        allowed_types = {
+            '1min': 1,
+            '4hour': 240
+        }
+
+        if candle_type in allowed_types:
+            return allowed_types[candle_type]
+        else:
+            return False
+
+
+    def __calculate_chunk_times(self, i, chunk, candle_seconds, now):
+        """
+        returns the start and end times in seconds
+
+        i: number of chunks
+        chunk: the number of lookbacks
+        candle_seconds: how many seconds per candle / lookback
+        now: The time now in seconds for the hard end time
+        """
+        chunk_seconds = chunk * candle_seconds
+
+        startedAt = int((now - chunk_seconds) - (i * chunk_seconds))
+        endAt = int(now - (i * chunk_seconds))
+
+        return startedAt, endAt
+
+    def get_market_data(self, candle_type, coin_pair, lookback):
+        """
+        Returns the market data for a set coin
+
+        TODO: This data should be stored in the class for retrieval later
+        TODO: This should make a request for less data based on the data stored in the class, or csv
+        """
+
+        # The maximum the API will return is 1500
+        # Set chunk limits
+        chunk = 1000
+        1000 if chunk >= lookback else lookback
+        data = pd.DataFrame(columns=['time', 'open', 'close', 'high', 'low', 'volume', 'turnover'])
+
+
+        candle_mins = self.__check_candle_type(candle_type)
+        candle_seconds = candle_mins * 60
+        now = time.time()
+
+        times = int(lookback / chunk)
+
+        # Set a rate limit of 10
+        10 if times > 10 else times
+
+        for i in range(times):
+            endpoint = '/api/v1/market/candles'
+            calc_chunk = chunk
+            startedAt, endAt = self.__calculate_chunk_times(i, calc_chunk, candle_seconds, now)
+            # This does not account for the remainder chunk: 1001 lookback will provide 2000 data
+
+            variables = '?type={}&symbol={}&startAt={}&endAt={}'.format(
+                candle_type, coin_pair, startedAt, endAt
+            )
+
+            # Get request
+            endpoint = endpoint + variables
+            resp = self.__send_request(endpoint)
+            resp.columns = ['time', 'open', 'close', 'high', 'low', 'volume', 'turnover']
+
+            if(self.__no_error_in_response(resp)):
+                data = data.append(resp)
+
+
+        if self.DEBUG:
+            print('times to run:', times, 'dataframe:', data.shape)
+
+        #data = pd.Timestamp(data, unit='s')
+
+        return data
 
 
     def delete_active_loan(self, id):
