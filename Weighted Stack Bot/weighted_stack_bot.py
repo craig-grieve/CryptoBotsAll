@@ -98,7 +98,10 @@ class WeightedStackBot:
     # Get minute tick data for coin
     def get_minute_tick_data(self, lookback):
         data = self.API.get_market_data('1min', self.TARGET_COIN+'-USDT', 1000)
-        print(data.head())
+
+
+        test = self.ANALYZER.extreams(data.loc[:, ['close']])
+        # Plot this
 
     # Save tick data to file
 

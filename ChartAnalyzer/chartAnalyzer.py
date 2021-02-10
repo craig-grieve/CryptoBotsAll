@@ -18,8 +18,7 @@ class ChartAnalyzer:
         """
 
         # Do I want to provide the column in the function parameters?
-
-        col = df.price.values
+        col = df.values
         ilocs_min = argrelextrema(col, np.less_equal, order=order)[0]
         ilocs_max = argrelextrema(col, np.greater_equal, order=order)[0]
 

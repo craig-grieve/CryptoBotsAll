@@ -54,9 +54,15 @@ class KuCoin:
             print('----', 'Init', '----')
             print('DEBUG:', self.DEBUG)
             print('SANDBOX:', self.SANDBOX)
+            print('IP:', self.__get_ip())
             print('')
 
         self.__update_account_balances()
+
+
+    def __get_ip(self):
+        ip = requests.get('https://api.ipify.org').text
+        return ip
 
 
     def __create_headers(self, endpoint, header_type='GET', data={}):
@@ -341,7 +347,7 @@ class KuCoin:
         if self.DEBUG:
             print('times to run:', times, 'dataframe:', data.shape)
 
-        #data = pd.Timestamp(data, unit='s')
+        data['time'] = pd.to_datetime(data['time'], unit='s')
 
         return data
 
