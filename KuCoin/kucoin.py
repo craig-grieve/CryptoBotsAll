@@ -13,19 +13,17 @@ import base64
 import hmac
 import hashlib
 import pandas as pd
+import numpy as np
 import time
 import config
 
 
 """
-TODO: Account Breakouts
-TODO: Allowed Account Breakouts
 TODO: Total sum of single ACCOUNT
 TODO: Total sum of all ACCOUNTS
 TODO: GET all orders for a single coin
 TODO: POST order for a single coin
 TODO: DELETE an order
-TODO: GET Market Tickers
 TODO: GET Order Book
 
 TODO: TESTS!!!!!!! TESTS!!!!! TESTS!!!!!!!
@@ -38,14 +36,14 @@ class KuCoin:
     """
     SANDBOX = False
     LIVE = False
-    DEBUG = False
+    DEBUG = True
     TRADABLE_COINS = []
     TRADABLE_ACCOUNTS = ['main', 'trade']
     ACCOUNTS = pd.DataFrame()
     ALLOWED_ACCOUNTS = pd.DataFrame()
 
 
-    def __init__(self, debug=False, sandbox=False):
+    def __init__(self, debug=True, sandbox=False):
         # Check in with Kucoin and make sure there is a valid response
         self.DEBUG = debug
         self.SANDBOX = sandbox
@@ -55,9 +53,12 @@ class KuCoin:
             print('DEBUG:', self.DEBUG)
             print('SANDBOX:', self.SANDBOX)
             print('IP:', self.__get_ip())
+            print('PYTHON VERSION:',sys.version)
             print('')
 
         self.__update_account_balances()
+        #self.__get_all_account_tickers()
+        #self.get_all_market_tickers()
 
 
     def __get_ip(self):
@@ -148,7 +149,7 @@ class KuCoin:
 
             if self.DEBUG:
                 print("SUCCESSFUL Response")
-                print(response['code'], ':', 'returned', len(response['data']), 'items of type ', type(response['data']) ,'::', response['data'][0])
+                print(response['code'], ':', 'returned', len(response['data']), 'items of type ', type(response['data']) ,'::', ret_resp.columns)
                 print('DataFrame:', ret_resp.shape)
                 print('')
 
@@ -169,6 +170,8 @@ class KuCoin:
         if isinstance(response, pd.DataFrame):
             return True
         else:
+            if self.DEBUG:
+                print('\n', 'There was an Error in the response', '\n')
             if response[:6] == "Error:":
                 return False
             else:
@@ -191,27 +194,76 @@ class KuCoin:
         return url
 
 
-    def set_tradable_coins(self, coins=[]):
+    def __get_ticker(self, coin_pair):
         """
-        Sets the coins that we are allowed to trade
-
-        coins: an array of coin tickers
         """
-        # Should check the coins entered are valid
-        # Should make sure there are funds available
-        self.TRADABLE_COINS = []
-        return True
+        endpoint = '/api/v1/market/orderbook/level1?symbol=' + coin_pair
+        resp = self.__send_request(endpoint)
+        resp.columns = ['sequence', 'bestAsk', 'size', 'price', 'bestBidSize', 'bestBid', 'bestAskSize', 'time']
 
 
-    def tradable_coins(self):
-        # Look to remove
+    def get_all_market_tickers(self):
         """
-        Future proofing, might want to make further checks here at some point
+        Returns all the market tickers on KuCoin
         """
-        if is_empty(self.TRADABLE_COINS):
-            return False
-        else:
-            return True
+
+        endpoint = '/api/v1/market/allTickers'
+        resp = self.__send_request(endpoint)
+
+        tickers = resp['ticker']
+
+        data = pd.json_normalize(tickers)
+
+        cols = ['last', 'high', 'low', 'buy', 'sell', 'vol', 'volValue', 'averagePrice']
+        data[cols] = data[cols].apply(pd.to_numeric, errors='coerce')
+
+        return data
+
+
+    def __add_markets_to_accounts(self):
+        """
+        Returns the account data combined with the market tickers
+        """
+
+        tickers = self.get_all_market_tickers()
+        cols = ['balance']
+        self.ACCOUNTS[cols] = self.ACCOUNTS[cols].apply(pd.to_numeric, errors='coerce')
+
+        tickers['currency'] = tickers['symbol'].str.split('-').str[0]
+        test = self.ACCOUNTS
+
+        usdt = tickers[tickers['symbol'].str.contains('-USDT')]
+        btc = tickers[tickers['symbol'].str.contains('-BTC')]
+
+        test = pd.merge(test, usdt[['currency', 'last']], on='currency', how='left')
+        test.rename(columns={'last': 'usdt'}, inplace=True)
+
+        test = pd.merge(test, btc[['currency', 'last']], on='currency', how='left')
+        test.rename(columns={'last': 'btc'}, inplace=True)
+
+        test['btcDollar'] = test['btc'] * tickers.loc[tickers['symbol'] == 'BTC-USDT', 'last'].iloc[0]
+        test['dollarValue'] = test.apply(self.__output_coin_type_value, axis=1)
+
+        print(test[['currency', 'type', 'balance', 'dollarValue']])
+        print(test['dollarValue'].sum())
+
+
+
+        if self.DEBUG:
+            print('')
+            print('ACCOUNTS:', self.ACCOUNTS.shape)
+
+
+    def __output_coin_type_value(self, row):
+        """
+        Returns the value of the column to use to calculate the dollar value of the asset
+        """
+        if not np.isnan(row['usdt']):
+            return row['usdt'] * row['balance']
+        elif not np.isnan(row['btcDollar']):
+            return row['btcDollar'] * row['balance']
+        elif row['currency'] == 'USDT':
+            return 1.00 * row['balance']
 
 
     def __update_account_balances(self):
@@ -225,11 +277,11 @@ class KuCoin:
 
         if(self.__no_error_in_response(resp)):
             self.ACCOUNTS = resp
+            cols = ['balance']
+            self.ACCOUNTS[cols] = self.ACCOUNTS[cols].apply(pd.to_numeric, errors='coerce')
 
-            # Breakout ACCOUNTS
-            # Breakout Allowed ACCOUNTS
+            self.__add_markets_to_accounts()
 
-            #resp = resp.loc[resp['type'] == 'main']
 
             if self.DEBUG:
                 if self.ACCOUNTS.shape[0] > 0:
@@ -347,9 +399,21 @@ class KuCoin:
         if self.DEBUG:
             print('times to run:', times, 'dataframe:', data.shape)
 
-        data['time'] = pd.to_datetime(data['time'], unit='s')
+        data = self.__convert_time(data)
 
         return data
+
+
+    def __convert_time(self, df):
+        """
+        Returns the dataframe with the time converted into a datetime
+
+        df: DataFrame
+        """
+
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+
+        return df
 
 
     def delete_active_loan(self, id):
@@ -386,3 +450,8 @@ class KuCoin:
         coin: a String of the single coin
         """
         return False
+
+
+
+kk = KuCoin()
+print(kk.ACCOUNTS)
